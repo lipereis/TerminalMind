@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from terminalmind.config import get_settings
+from terminalmind.core.agent import ResearchAgent, tokenize
 from terminalmind.core.schemas import (
+    Chunk,
     HistoryEntry,
     ResearchAnswer,
 )
@@ -102,3 +105,51 @@ def test_history_append_and_load_newest_first(tmp_path: Path) -> None:
     body = report.read_text(encoding="utf-8")
     assert "second" in body
     assert "q2" in body
+
+
+def test_tokenize_alnum_lowercase() -> None:
+    assert tokenize("Hello, AI-2024!") == {"hello", "ai", "2024"}
+
+
+def test_select_chunks_prefers_overlap(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    settings = get_settings().model_copy(
+        update={"data_dir": tmp_path, "max_context_chars": 500}
+    )
+    agent = ResearchAgent(settings=settings, client=MagicMock())
+    chunks = [
+        Chunk(id="a:0", source_id="a", text="cats sit on mats", index=0),
+        Chunk(id="a:1", source_id="a", text="quantum chromodynamics research", index=1),
+        Chunk(id="a:2", source_id="a", text="cats and dogs research", index=2),
+    ]
+    selected = agent.select_chunks("cats research", chunks)
+    assert selected[0].id in {"a:2", "a:0"}
+    assert "chromodynamics" not in selected[0].text
+
+
+def test_search_empty_ingest_sets_used_ingest_false(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    settings = get_settings().model_copy(update={"data_dir": tmp_path})
+    storage = Storage(tmp_path)
+    storage.ensure_layout()
+
+    parsed = ResearchAnswer(
+        summary="LLM only",
+        key_points=["p1"],
+        follow_ups=["f1"],
+    )
+    mock_client = MagicMock()
+    mock_client.beta.chat.completions.parse.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(parsed=parsed))]
+    )
+    agent = ResearchAgent(settings=settings, storage=storage, client=mock_client)
+    entry = agent.search("what is X?")
+    assert entry.used_ingest is False
+    assert entry.answer.summary == "LLM only"
+    assert storage.load_history()[0].id == entry.id
+    assert (tmp_path / "reports" / f"{entry.id}.md").exists()
+    mock_client.beta.chat.completions.parse.assert_called_once()
+    kwargs = mock_client.beta.chat.completions.parse.call_args.kwargs
+    assert kwargs["response_format"] is ResearchAnswer
