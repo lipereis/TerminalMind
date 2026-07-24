@@ -13,10 +13,93 @@ from terminalmind.core.schemas import Chunk, HistoryEntry, IngestRecord, Researc
 from terminalmind.utils.storage import Storage
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "if",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "as",
+        "by",
+        "with",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "am",
+        "i",
+        "me",
+        "my",
+        "you",
+        "your",
+        "we",
+        "our",
+        "they",
+        "them",
+        "their",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "how",
+        "when",
+        "where",
+        "why",
+        "do",
+        "does",
+        "did",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "just",
+        "not",
+        "no",
+        "yes",
+        "so",
+        "than",
+        "too",
+        "very",
+        "about",
+        "into",
+        "over",
+        "after",
+        "before",
+        "today",
+        "now",
+        "here",
+        "there",
+    }
+)
+_MIN_CHUNK_SCORE = 2
 
 
 def tokenize(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
+
+
+def content_tokens(text: str) -> set[str]:
+    """Tokens used for retrieval — stopwords dropped to avoid weak matches."""
+    return {t for t in tokenize(text) if t not in _STOPWORDS and len(t) > 1}
 
 
 class ResearchAgent:
@@ -47,19 +130,19 @@ class ResearchAgent:
         )
 
     def select_chunks(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
-        q_tokens = tokenize(query)
+        q_tokens = content_tokens(query)
         if not q_tokens or not chunks:
             return []
 
         def score(chunk: Chunk) -> tuple[int, int]:
-            overlap = len(q_tokens & tokenize(chunk.text))
+            overlap = len(q_tokens & content_tokens(chunk.text))
             return (overlap, -chunk.index)
 
         ranked = sorted(chunks, key=score, reverse=True)
         selected: list[Chunk] = []
         total = 0
         for chunk in ranked:
-            if score(chunk)[0] <= 0:
+            if score(chunk)[0] < _MIN_CHUNK_SCORE:
                 break
             if total + len(chunk.text) > self.settings.max_context_chars and selected:
                 break
@@ -113,12 +196,21 @@ class ResearchAgent:
             context_block = "\n\n".join(f"[chunk {c.id}]\n{c.text}" for c in selected)
 
         system = (
-            "You are TerminalMind, a careful research assistant. "
-            "Return only structured findings matching the schema."
+            "You are TerminalMind, a research assistant that answers the user's "
+            "actual question. Fill summary/key_points/follow_ups for that question. "
+            "Use local context only when it is relevant; never force unrelated docs "
+            "into the answer. For greetings or chit-chat, reply briefly and honestly "
+            "in summary (you are software, not a person), keep key_points short or "
+            "empty, and suggest a research question in follow_ups."
         )
-        user = f"Research query:\n{query}"
+        user = f"User question:\n{query}"
         if context_block:
-            user += f"\n\nLocal context:\n{context_block}"
+            user += (
+                "\n\nLocal context (use only if relevant to the question):\n"
+                f"{context_block}"
+            )
+        else:
+            user += "\n\n(No relevant local documents matched this question.)"
 
         messages = [
             {"role": "system", "content": system},

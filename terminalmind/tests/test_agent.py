@@ -118,6 +118,23 @@ def test_tokenize_alnum_lowercase() -> None:
     assert tokenize("Hello, AI-2024!") == {"hello", "ai", "2024"}
 
 
+def test_greeting_does_not_select_unrelated_chunks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    settings = get_settings().model_copy(update={"data_dir": tmp_path})
+    agent = ResearchAgent(settings=settings, client=MagicMock())
+    chunks = [
+        Chunk(
+            id="a:0",
+            source_id="a",
+            text="TerminalMind is a research CLI with ingest and search.",
+            index=0,
+        ),
+    ]
+    assert agent.select_chunks("How are you today?", chunks) == []
+
+
 def test_select_chunks_prefers_overlap(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     settings = get_settings().model_copy(
