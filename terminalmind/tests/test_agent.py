@@ -49,6 +49,8 @@ def test_history_entry_embeds_answer() -> None:
 
 def test_settings_data_dir_override(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.setenv("TERMINALMIND_DATA_DIR", str(tmp_path))
     settings = get_settings()
     assert settings.openai_api_key == "test-key"

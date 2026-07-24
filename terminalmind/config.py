@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_MODEL")
+    openai_base_url: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_BASE_URL",
+    )
     data_dir: Path = Field(
         default_factory=lambda: Path.home() / ".terminalmind",
         validation_alias="TERMINALMIND_DATA_DIR",

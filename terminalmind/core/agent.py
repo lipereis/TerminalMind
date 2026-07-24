@@ -29,7 +29,15 @@ class ResearchAgent:
         self.settings = settings
         self.storage = storage or Storage(settings.data_dir)
         self.storage.ensure_layout()
-        self.client = client or OpenAI(api_key=settings.openai_api_key)
+        if client is not None:
+            self.client = client
+        elif settings.openai_base_url:
+            self.client = OpenAI(
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_base_url,
+            )
+        else:
+            self.client = OpenAI(api_key=settings.openai_api_key)
 
     def ingest(self, path: Path) -> tuple[IngestRecord, bool]:
         return self.storage.ingest_file(
@@ -59,6 +67,40 @@ class ResearchAgent:
             total += len(chunk.text)
         return selected
 
+    def _structured_answer(self, messages: list[dict[str, str]]) -> ResearchAnswer:
+        """Parse into ResearchAnswer via OpenAI Structured Outputs, with JSON fallback."""
+        try:
+            completion = self.client.beta.chat.completions.parse(
+                model=self.settings.openai_model,
+                messages=messages,
+                response_format=ResearchAnswer,
+            )
+            parsed = completion.choices[0].message.parsed
+            if parsed is not None:
+                return parsed
+            logger.warning("parse() returned empty; falling back to JSON schema")
+        except (AuthenticationError, RateLimitError, APITimeoutError):
+            raise
+        except (AttributeError, TypeError, APIError) as exc:
+            logger.warning("Structured parse unavailable ({}); using JSON fallback", exc)
+
+        completion = self.client.chat.completions.create(
+            model=self.settings.openai_model,
+            messages=messages,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "research_answer",
+                    "strict": True,
+                    "schema": ResearchAnswer.model_json_schema(),
+                },
+            },
+        )
+        content = completion.choices[0].message.content
+        if not content:
+            raise ValueError("Model returned invalid structured output")
+        return ResearchAnswer.model_validate_json(content)
+
     def search(self, query: str) -> HistoryEntry:
         chunks = self.storage.load_chunks()
         selected = self.select_chunks(query, chunks) if chunks else []
@@ -78,23 +120,15 @@ class ResearchAgent:
         if context_block:
             user += f"\n\nLocal context:\n{context_block}"
 
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
         try:
-            completion = self.client.beta.chat.completions.parse(
-                model=self.settings.openai_model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format=ResearchAnswer,
-            )
+            parsed = self._structured_answer(messages)
         except (AuthenticationError, RateLimitError, APITimeoutError, APIError):
-            logger.exception("OpenAI API failure during search")
+            logger.exception("LLM API failure during search")
             raise
-
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
-            logger.error("Model returned empty parsed message")
-            raise ValueError("Model returned invalid structured output")
 
         entry = HistoryEntry(
             id=str(uuid.uuid4()),

@@ -1,6 +1,6 @@
 # TerminalMind
 
-Personal Research Assistant CLI for AI Engineering portfolios. Queries OpenAI with **strict Structured Outputs** (Pydantic), optionally grounds answers in locally ingested `.txt` / `.md` files via keyword RAG-lite, and keeps session history + markdown reports.
+Personal Research Assistant CLI for AI Engineering portfolios. Queries an LLM with **strict Structured Outputs** (Pydantic), optionally grounds answers in locally ingested `.txt` / `.md` files via keyword RAG-lite, and keeps session history + markdown reports.
 
 ## Install
 
@@ -13,8 +13,20 @@ source .venv/Scripts/activate
 
 pip install -e ".[dev]"
 cp .env.example .env
-# set OPENAI_API_KEY in .env
 ```
+
+## Free API (Gemini)
+
+1. Get a free key: https://aistudio.google.com/apikey
+2. Put it in `.env` (already templated in `.env.example`):
+
+```env
+OPENAI_API_KEY=your-gemini-api-key
+OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+OPENAI_MODEL=gemini-flash-latest
+```
+
+Uses Google’s OpenAI-compatible endpoint — same SDK, no OpenAI billing.
 
 ## Usage
 
@@ -32,7 +44,7 @@ Empty ingest store: search warns and falls back to LLM-only.
 
 ## Architecture
 
-Thin Typer CLI → `ResearchAgent` → OpenAI `beta.chat.completions.parse` + `Storage` under `~/.terminalmind/` (or `--data-dir`).
+Thin Typer CLI → `ResearchAgent` → OpenAI-compatible client (`parse` + JSON-schema fallback) + `Storage` under `~/.terminalmind/` (or `--data-dir`).
 
 Design: `docs/superpowers/specs/2026-07-23-terminalmind-design.md`
 
