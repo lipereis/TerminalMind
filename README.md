@@ -63,4 +63,11 @@ pytest -v
 
 CI runs the same suite on Python 3.11–3.13 via GitHub Actions.
 
-Regenerate the demo GIF (optional): `pip install pillow && python scripts/make_demo_gif.py`
+Regenerate the demo GIF (optional):
+
+```bash
+python -m pip install pillow
+python scripts/make_demo_gif.py
+```
+
+If you see `failed to locate pyvenv.cfg`, your venv is broken — use system Python (`py -m pip` / `py scripts/make_demo_gif.py` on Windows) or recreate `.venv`.
