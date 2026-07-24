@@ -53,3 +53,5 @@ Design: `docs/superpowers/specs/2026-07-23-terminalmind-design.md`
 ```bash
 pytest -v
 ```
+
+CI runs the same suite on Python 3.11–3.13 via GitHub Actions.
