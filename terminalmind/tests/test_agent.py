@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from typer.testing import CliRunner
+
 from terminalmind.config import get_settings
 from terminalmind.core.agent import ResearchAgent, tokenize
 from terminalmind.core.schemas import (
@@ -9,7 +11,10 @@ from terminalmind.core.schemas import (
     HistoryEntry,
     ResearchAnswer,
 )
+from terminalmind.main import app
 from terminalmind.utils.storage import Storage
+
+runner = CliRunner()
 
 
 def test_research_answer_roundtrip() -> None:
@@ -153,3 +158,54 @@ def test_search_empty_ingest_sets_used_ingest_false(
     mock_client.beta.chat.completions.parse.assert_called_once()
     kwargs = mock_client.beta.chat.completions.parse.call_args.kwargs
     assert kwargs["response_format"] is ResearchAnswer
+
+
+def test_ingest_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    bad = tmp_path / "x.pdf"
+    bad.write_bytes(b"%PDF")
+    result = runner.invoke(app, ["--data-dir", str(tmp_path), "ingest", str(bad)])
+    assert result.exit_code != 0
+
+
+def test_ingest_and_history_flow(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    doc = tmp_path / "note.md"
+    doc.write_text("TerminalMind portfolio notes about RAG.", encoding="utf-8")
+    r1 = runner.invoke(app, ["--data-dir", str(tmp_path), "ingest", str(doc)])
+    assert r1.exit_code == 0
+
+    storage = Storage(tmp_path)
+    entry = HistoryEntry(
+        id="seed",
+        query="RAG?",
+        answer=ResearchAnswer(summary="About RAG", key_points=["k"], follow_ups=["f"]),
+        created_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+        used_ingest=True,
+        chunk_ids=["x:0"],
+    )
+    storage.append_history(entry)
+    r2 = runner.invoke(app, ["--data-dir", str(tmp_path), "history"])
+    assert r2.exit_code == 0
+    assert "RAG?" in r2.stdout
+    assert "About RAG" in r2.stdout
+
+
+def test_search_command_uses_agent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    fake_entry = HistoryEntry(
+        id="s1",
+        query="q",
+        answer=ResearchAnswer(summary="Sum", key_points=["k"], follow_ups=["f"]),
+        created_at=datetime(2026, 1, 4, tzinfo=timezone.utc),
+        used_ingest=False,
+        chunk_ids=[],
+    )
+
+    def fake_search(self, query: str) -> HistoryEntry:  # noqa: ARG001
+        return fake_entry
+
+    monkeypatch.setattr(ResearchAgent, "search", fake_search)
+    result = runner.invoke(app, ["--data-dir", str(tmp_path), "search", "q"])
+    assert result.exit_code == 0
+    assert "Sum" in result.stdout
