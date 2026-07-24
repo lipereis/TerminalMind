@@ -3,10 +3,18 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class SourceCitation(BaseModel):
+    """Provenance for a grounded answer — chunk id + short snippet."""
+
+    chunk_id: str
+    snippet: str = ""
+
+
 class ResearchAnswer(BaseModel):
     summary: str
     key_points: list[str] = Field(default_factory=list)
     follow_ups: list[str] = Field(default_factory=list)
+    sources: list[SourceCitation] = Field(default_factory=list)
 
 
 class Chunk(BaseModel):

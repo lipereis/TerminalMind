@@ -5,11 +5,12 @@ from unittest.mock import MagicMock
 from typer.testing import CliRunner
 
 from terminalmind.config import get_settings
-from terminalmind.core.agent import ResearchAgent, tokenize
+from terminalmind.core.agent import ResearchAgent, snippet_for, tokenize
 from terminalmind.core.schemas import (
     Chunk,
     HistoryEntry,
     ResearchAnswer,
+    SourceCitation,
 )
 from terminalmind.main import app
 from terminalmind.utils.storage import Storage
@@ -22,11 +23,14 @@ def test_research_answer_roundtrip() -> None:
         "summary": "Overview",
         "key_points": ["a", "b"],
         "follow_ups": ["what next?"],
+        "sources": [{"chunk_id": "s1:0", "snippet": "hello world"}],
     }
     answer = ResearchAnswer.model_validate(raw)
     assert answer.summary == "Overview"
     assert answer.key_points == ["a", "b"]
     assert answer.follow_ups == ["what next?"]
+    assert answer.sources[0].chunk_id == "s1:0"
+    assert answer.sources[0].snippet == "hello world"
 
 
 def test_history_entry_embeds_answer() -> None:
@@ -112,6 +116,14 @@ def test_history_append_and_load_newest_first(tmp_path: Path) -> None:
     body = report.read_text(encoding="utf-8")
     assert "second" in body
     assert "q2" in body
+    assert "## Sources" in body
+
+
+def test_snippet_for_truncates() -> None:
+    text = "word " * 80
+    snip = snippet_for(text, limit=40)
+    assert len(snip) <= 40
+    assert snip.endswith("…")
 
 
 def test_tokenize_alnum_lowercase() -> None:
@@ -177,6 +189,44 @@ def test_search_empty_ingest_sets_used_ingest_false(
     mock_client.beta.chat.completions.parse.assert_called_once()
     kwargs = mock_client.beta.chat.completions.parse.call_args.kwargs
     assert kwargs["response_format"] is ResearchAnswer
+    assert entry.answer.sources == []
+
+
+def test_search_attaches_sources_from_selected_chunks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    settings = get_settings().model_copy(update={"data_dir": tmp_path})
+    storage = Storage(tmp_path)
+    storage.ensure_layout()
+    src = tmp_path / "cats.md"
+    src.write_text(
+        "Cats research shows feline behavior patterns in domestic settings.",
+        encoding="utf-8",
+    )
+    storage.ingest_file(src, chunk_size=800, overlap=100)
+
+    parsed = ResearchAnswer(
+        summary="Cats are studied",
+        key_points=["behavior"],
+        follow_ups=["more?"],
+        sources=[],
+    )
+    mock_client = MagicMock()
+    mock_client.beta.chat.completions.parse.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(parsed=parsed))]
+    )
+    agent = ResearchAgent(settings=settings, storage=storage, client=mock_client)
+    entry = agent.search("cats research behavior")
+    assert entry.used_ingest is True
+    assert entry.answer.sources
+    assert entry.answer.sources[0].chunk_id in entry.chunk_ids
+    assert "Cats" in entry.answer.sources[0].snippet or "cats" in entry.answer.sources[
+        0
+    ].snippet.lower()
+    report = (tmp_path / "reports" / f"{entry.id}.md").read_text(encoding="utf-8")
+    assert "## Sources" in report
+    assert entry.answer.sources[0].chunk_id in report
 
 
 def test_ingest_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
@@ -228,6 +278,34 @@ def test_search_command_uses_agent(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["--data-dir", str(tmp_path), "search", "q"])
     assert result.exit_code == 0
     assert "Sum" in result.stdout
+    assert "Sources: (none" in result.stdout
+
+
+def test_search_command_shows_sources(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    fake_entry = HistoryEntry(
+        id="s2",
+        query="cats",
+        answer=ResearchAnswer(
+            summary="About cats",
+            key_points=["k"],
+            follow_ups=["f"],
+            sources=[SourceCitation(chunk_id="a:0", snippet="cats sit on mats")],
+        ),
+        created_at=datetime(2026, 1, 6, tzinfo=timezone.utc),
+        used_ingest=True,
+        chunk_ids=["a:0"],
+    )
+
+    def fake_search(self, query: str) -> HistoryEntry:  # noqa: ARG001
+        return fake_entry
+
+    monkeypatch.setattr(ResearchAgent, "search", fake_search)
+    result = runner.invoke(app, ["--data-dir", str(tmp_path), "search", "cats"])
+    assert result.exit_code == 0
+    assert "Sources" in result.stdout
+    assert "a:0" in result.stdout
+    assert "cats sit on mats" in result.stdout
 
 
 def test_chat_repl_asks_then_quits(tmp_path: Path, monkeypatch) -> None:

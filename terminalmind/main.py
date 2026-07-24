@@ -66,6 +66,14 @@ def _render_answer(answer: ResearchAnswer) -> None:
     keypoints = "\n".join(f"- {p}" for p in answer.key_points) or "- (none)"
     followups = "\n".join(f"- {p}" for p in answer.follow_ups) or "- (none)"
     console.print(Markdown(f"## Key Points\n\n{keypoints}\n\n## Follow-ups\n\n{followups}"))
+    if answer.sources:
+        lines = [
+            f"- `{src.chunk_id}` — {src.snippet}" if src.snippet else f"- `{src.chunk_id}`"
+            for src in answer.sources
+        ]
+        console.print(Markdown("## Sources\n\n" + "\n".join(lines)))
+    else:
+        console.print("[dim]Sources: (none — LLM-only)[/dim]")
 
 
 def _run_search(agent: ResearchAgent, query: str, *, warn_empty_ingest: bool = True) -> None:

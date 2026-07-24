@@ -1,6 +1,6 @@
 # TerminalMind
 
-Personal Research Assistant CLI for AI Engineering portfolios. Queries an LLM with **strict Structured Outputs** (Pydantic), optionally grounds answers in locally ingested `.txt` / `.md` files via keyword RAG-lite, and keeps session history + markdown reports.
+Personal Research Assistant CLI for AI Engineering portfolios. Queries an LLM with **strict Structured Outputs** (Pydantic: summary, key points, follow-ups, **sources**), optionally grounds answers in locally ingested `.txt` / `.md` files via keyword RAG-lite, shows chunk citations under each answer, and keeps session history + markdown reports.
 
 ## Install
 

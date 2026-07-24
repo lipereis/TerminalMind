@@ -222,6 +222,13 @@ class Storage:
         path = self.reports_dir / f"{entry.id}.md"
         key_points = "\n".join(f"- {p}" for p in entry.answer.key_points) or "- (none)"
         follow_ups = "\n".join(f"- {p}" for p in entry.answer.follow_ups) or "- (none)"
+        if entry.answer.sources:
+            sources = "\n".join(
+                f"- `{s.chunk_id}` — {s.snippet}" if s.snippet else f"- `{s.chunk_id}`"
+                for s in entry.answer.sources
+            )
+        else:
+            sources = "- (none)"
         body = (
             f"# Research Report\n\n"
             f"- **ID:** {entry.id}\n"
@@ -230,7 +237,8 @@ class Storage:
             f"- **Used ingest:** {entry.used_ingest}\n\n"
             f"## Summary\n\n{entry.answer.summary}\n\n"
             f"## Key Points\n\n{key_points}\n\n"
-            f"## Follow-ups\n\n{follow_ups}\n"
+            f"## Follow-ups\n\n{follow_ups}\n\n"
+            f"## Sources\n\n{sources}\n"
         )
         path.write_text(body, encoding="utf-8")
         return path

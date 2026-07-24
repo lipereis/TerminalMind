@@ -9,10 +9,17 @@ from loguru import logger
 from openai import APIError, APITimeoutError, AuthenticationError, OpenAI, RateLimitError
 
 from terminalmind.config import Settings
-from terminalmind.core.schemas import Chunk, HistoryEntry, IngestRecord, ResearchAnswer
+from terminalmind.core.schemas import (
+    Chunk,
+    HistoryEntry,
+    IngestRecord,
+    ResearchAnswer,
+    SourceCitation,
+)
 from terminalmind.utils.storage import Storage
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_SNIPPET_LEN = 160
 _STOPWORDS = frozenset(
     {
         "a",
@@ -100,6 +107,13 @@ def tokenize(text: str) -> set[str]:
 def content_tokens(text: str) -> set[str]:
     """Tokens used for retrieval — stopwords dropped to avoid weak matches."""
     return {t for t in tokenize(text) if t not in _STOPWORDS and len(t) > 1}
+
+
+def snippet_for(text: str, limit: int = _SNIPPET_LEN) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1] + "…"
 
 
 class ResearchAgent:
@@ -201,7 +215,9 @@ class ResearchAgent:
             "Use local context only when it is relevant; never force unrelated docs "
             "into the answer. For greetings or chit-chat, reply briefly and honestly "
             "in summary (you are software, not a person), keep key_points short or "
-            "empty, and suggest a research question in follow_ups."
+            "empty, and suggest a research question in follow_ups. "
+            "Leave sources as an empty list — retrieval provenance is attached by "
+            "the system from matched chunks."
         )
         user = f"User question:\n{query}"
         if context_block:
@@ -222,10 +238,15 @@ class ResearchAgent:
             logger.exception("LLM API failure during search")
             raise
 
+        sources = [
+            SourceCitation(chunk_id=c.id, snippet=snippet_for(c.text)) for c in selected
+        ]
+        answer = parsed.model_copy(update={"sources": sources})
+
         entry = HistoryEntry(
             id=str(uuid.uuid4()),
             query=query,
-            answer=parsed,
+            answer=answer,
             created_at=datetime.now(timezone.utc),
             used_ingest=used_ingest,
             chunk_ids=[c.id for c in selected],
