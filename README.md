@@ -33,12 +33,15 @@ Uses Google’s OpenAI-compatible endpoint — same SDK, no OpenAI billing.
 ```bash
 terminalmind ingest ./notes.md
 terminalmind search "What are the main claims?"
+terminalmind chat
 terminalmind history
 terminalmind --data-dir ./tmp-data search "..."
 terminalmind --verbose search "debug run"
 ```
 
-Flow: **ingest** → **search** (structured summary / key points / follow-ups) → **history**.
+Flow: **ingest** → **search** / **chat** (structured summary / key points / follow-ups) → **history**.
+
+`chat` opens an interactive prompt (`you>`) so you can ask many questions without retyping the full command. Type `quit` to leave.
 
 Empty ingest store: search warns and falls back to LLM-only.
 

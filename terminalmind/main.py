@@ -68,6 +68,28 @@ def _render_answer(answer: ResearchAnswer) -> None:
     console.print(Markdown(f"## Key Points\n\n{keypoints}\n\n## Follow-ups\n\n{followups}"))
 
 
+def _run_search(agent: ResearchAgent, query: str, *, warn_empty_ingest: bool = True) -> None:
+    if warn_empty_ingest and not agent.storage.load_chunks():
+        console.print(
+            "[yellow]No ingested documents found. Falling back to LLM-only answer.[/yellow]"
+        )
+    try:
+        with console.status("Researching…"):
+            entry = agent.search(query)
+    except (AuthenticationError, RateLimitError, APITimeoutError, APIError) as exc:
+        console.print(f"[red]OpenAI API error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    _render_answer(entry.answer)
+    console.print(
+        f"[dim]Saved history + report ({entry.id})"
+        f"{' · grounded in ingest' if entry.used_ingest else ' · LLM-only'}[/dim]"
+    )
+
+
 @app.command("ingest")
 def ingest_cmd(
     ctx: typer.Context,
@@ -91,26 +113,42 @@ def search_cmd(
     query: str = typer.Argument(..., help="Research query"),
 ) -> None:
     agent = _build_agent(ctx, require_api_key=True)
-    chunks = agent.storage.load_chunks()
-    if not chunks:
-        console.print(
-            "[yellow]No ingested documents found. Falling back to LLM-only answer.[/yellow]"
-        )
-    try:
-        with console.status("Researching…"):
-            entry = agent.search(query)
-    except (AuthenticationError, RateLimitError, APITimeoutError, APIError) as exc:
-        console.print(f"[red]OpenAI API error:[/red] {exc}")
-        raise typer.Exit(1) from exc
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+    _run_search(agent, query)
 
-    _render_answer(entry.answer)
+
+@app.command("chat")
+def chat_cmd(ctx: typer.Context) -> None:
+    """Interactive REPL — type questions without repeating the full CLI."""
+    agent = _build_agent(ctx, require_api_key=True)
     console.print(
-        f"[dim]Saved history + report ({entry.id})"
-        f"{' · grounded in ingest' if entry.used_ingest else ' · LLM-only'}[/dim]"
+        "[bold]TerminalMind chat[/bold] — ask research questions.\n"
+        "[dim]Commands: quit | exit | q  ·  Ctrl+C to leave[/dim]"
     )
+    if not agent.storage.load_chunks():
+        console.print(
+            "[yellow]No ingested documents yet — answers will be LLM-only "
+            "until you run `terminalmind ingest`.[/yellow]"
+        )
+
+    while True:
+        try:
+            query = console.input("[bold cyan]you>[/] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Bye.[/dim]")
+            break
+
+        if not query:
+            continue
+        if query.lower() in {"quit", "exit", "q"}:
+            console.print("[dim]Bye.[/dim]")
+            break
+
+        try:
+            _run_search(agent, query, warn_empty_ingest=False)
+        except typer.Exit:
+            console.print("[yellow]API error — try another question or quit.[/yellow]")
+            continue
+        console.print()
 
 
 @app.command("history")

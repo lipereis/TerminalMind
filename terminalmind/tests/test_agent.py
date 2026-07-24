@@ -228,3 +228,34 @@ def test_search_command_uses_agent(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["--data-dir", str(tmp_path), "search", "q"])
     assert result.exit_code == 0
     assert "Sum" in result.stdout
+
+
+def test_chat_repl_asks_then_quits(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    def fake_search(self, query: str) -> HistoryEntry:
+        calls.append(query)
+        return HistoryEntry(
+            id="c1",
+            query=query,
+            answer=ResearchAnswer(
+                summary=f"Answer to {query}",
+                key_points=["k"],
+                follow_ups=["f"],
+            ),
+            created_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
+            used_ingest=False,
+            chunk_ids=[],
+        )
+
+    monkeypatch.setattr(ResearchAgent, "search", fake_search)
+    result = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "chat"],
+        input="What is RAG?\nquit\n",
+    )
+    assert result.exit_code == 0
+    assert calls == ["What is RAG?"]
+    assert "Answer to What is RAG?" in result.stdout
+    assert "Bye" in result.stdout
