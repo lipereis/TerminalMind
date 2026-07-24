@@ -13,7 +13,7 @@ from terminalmind.core.schemas import (
     SourceCitation,
 )
 from terminalmind.main import app
-from terminalmind.utils.storage import Storage
+from terminalmind.utils.storage import Storage, collect_ingest_paths
 
 runner = CliRunner()
 
@@ -235,6 +235,63 @@ def test_ingest_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> No
     bad.write_bytes(b"%PDF")
     result = runner.invoke(app, ["--data-dir", str(tmp_path), "ingest", str(bad)])
     assert result.exit_code != 0
+
+
+def test_collect_ingest_paths_folder(tmp_path: Path) -> None:
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("alpha", encoding="utf-8")
+    (notes / "b.txt").write_text("beta", encoding="utf-8")
+    (notes / "skip.pdf").write_bytes(b"%PDF")
+    nested = notes / "deep"
+    nested.mkdir()
+    (nested / "c.md").write_text("gamma", encoding="utf-8")
+    paths = collect_ingest_paths(notes)
+    names = {p.name for p in paths}
+    assert names == {"a.md", "b.txt", "c.md"}
+
+
+def test_ingest_folder_cli(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    (notes / "one.md").write_text("# One\n\nhello", encoding="utf-8")
+    (notes / "two.txt").write_text("second doc", encoding="utf-8")
+    result = runner.invoke(app, ["--data-dir", str(tmp_path / "data"), "ingest", str(notes)])
+    assert result.exit_code == 0
+    assert "Ingested" in result.stdout
+    assert "2 files" in result.stdout
+    storage = Storage(tmp_path / "data")
+    assert len(storage.list_ingest_records()) == 2
+
+
+def test_history_export(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    data = tmp_path / "data"
+    storage = Storage(data)
+    storage.ensure_layout()
+    storage.append_history(
+        HistoryEntry(
+            id="e1",
+            query="Q1",
+            answer=ResearchAnswer(summary="S1", key_points=["k"], follow_ups=["f"]),
+            created_at=datetime(2026, 1, 7, tzinfo=timezone.utc),
+            used_ingest=False,
+            chunk_ids=[],
+        )
+    )
+    out = tmp_path / "export.md"
+    result = runner.invoke(
+        app,
+        ["--data-dir", str(data), "history", "--export", str(out)],
+    )
+    assert result.exit_code == 0
+    assert out.exists()
+    body = out.read_text(encoding="utf-8")
+    assert "# TerminalMind History Export" in body
+    assert "Q1" in body
+    assert "S1" in body
+    assert "Exported" in result.stdout
 
 
 def test_ingest_and_history_flow(tmp_path: Path, monkeypatch) -> None:

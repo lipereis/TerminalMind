@@ -14,7 +14,7 @@ from rich.table import Table
 from terminalmind.config import get_settings
 from terminalmind.core.agent import ResearchAgent
 from terminalmind.core.schemas import ResearchAnswer
-from terminalmind.utils.storage import Storage
+from terminalmind.utils.storage import Storage, collect_ingest_paths
 
 console = Console()
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="TerminalMind research CLI")
@@ -101,18 +101,43 @@ def _run_search(agent: ResearchAgent, query: str, *, warn_empty_ingest: bool = T
 @app.command("ingest")
 def ingest_cmd(
     ctx: typer.Context,
-    path: Path = typer.Argument(..., exists=False, help="Path to .txt or .md file"),
+    path: Path = typer.Argument(
+        ...,
+        exists=False,
+        help="Path to a .txt/.md file or a folder of them",
+    ),
 ) -> None:
     agent = _build_agent(ctx, require_api_key=False)
     try:
-        record, created = agent.ingest(path)
+        targets = collect_ingest_paths(path)
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    if created:
-        console.print(f"[green]Ingested[/green] {record.source_path} ({record.char_count} chars)")
-    else:
-        console.print(f"[yellow]Already ingested[/yellow] (hash {record.content_hash[:12]}…)")
+
+    created_n = 0
+    skipped_n = 0
+    for target in targets:
+        try:
+            record, created = agent.ingest(target)
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        if created:
+            created_n += 1
+            console.print(
+                f"[green]Ingested[/green] {record.source_path} ({record.char_count} chars)"
+            )
+        else:
+            skipped_n += 1
+            console.print(
+                f"[yellow]Already ingested[/yellow] {target.name} "
+                f"(hash {record.content_hash[:12]}…)"
+            )
+    if len(targets) > 1:
+        console.print(
+            f"[dim]Done: {created_n} ingested, {skipped_n} skipped "
+            f"({len(targets)} files)[/dim]"
+        )
 
 
 @app.command("search")
@@ -160,12 +185,29 @@ def chat_cmd(ctx: typer.Context) -> None:
 
 
 @app.command("history")
-def history_cmd(ctx: typer.Context) -> None:
+def history_cmd(
+    ctx: typer.Context,
+    export: Optional[Path] = typer.Option(
+        None,
+        "--export",
+        help="Write all sessions to a markdown file",
+    ),
+) -> None:
     agent = _build_agent(ctx, require_api_key=False)
     entries = agent.storage.load_history()
     if not entries:
         console.print("[dim]No research sessions yet.[/dim]")
+        raise typer.Exit(0)
+
+    if export is not None:
+        try:
+            out = agent.storage.export_history(export)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]Exported[/green] {len(entries)} sessions → {out}")
         return
+
     table = Table(title="Research History")
     table.add_column("Time", style="cyan")
     table.add_column("Query")

@@ -16,6 +16,30 @@ from terminalmind.core.schemas import Chunk, HistoryEntry, IngestRecord
 ALLOWED_SUFFIXES = {".txt", ".md"}
 
 
+def collect_ingest_paths(path: Path) -> list[Path]:
+    """Resolve a file or directory into sorted .txt/.md paths to ingest."""
+    if not path.exists():
+        raise FileNotFoundError(f"Path not found: {path}")
+    if path.is_file():
+        if path.suffix.lower() not in ALLOWED_SUFFIXES:
+            raise ValueError(f"Unsupported file type: {path.suffix} (use .txt or .md)")
+        return [path]
+    if not path.is_dir():
+        raise ValueError(f"Not a file or directory: {path}")
+
+    found: list[Path] = []
+    for candidate in sorted(path.rglob("*")):
+        if not candidate.is_file():
+            continue
+        if any(part.startswith(".") for part in candidate.parts):
+            continue
+        if candidate.suffix.lower() in ALLOWED_SUFFIXES:
+            found.append(candidate)
+    if not found:
+        raise ValueError(f"No .txt or .md files found under {path}")
+    return found
+
+
 class Storage:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
@@ -242,3 +266,38 @@ class Storage:
         )
         path.write_text(body, encoding="utf-8")
         return path
+
+    def export_history(self, destination: Path) -> Path:
+        entries = self.load_history()
+        if not entries:
+            raise ValueError("No research sessions to export")
+
+        parts: list[str] = ["# TerminalMind History Export\n"]
+        for entry in entries:
+            key_points = (
+                "\n".join(f"- {p}" for p in entry.answer.key_points) or "- (none)"
+            )
+            follow_ups = (
+                "\n".join(f"- {p}" for p in entry.answer.follow_ups) or "- (none)"
+            )
+            if entry.answer.sources:
+                sources = "\n".join(
+                    f"- `{s.chunk_id}` — {s.snippet}"
+                    if s.snippet
+                    else f"- `{s.chunk_id}`"
+                    for s in entry.answer.sources
+                )
+            else:
+                sources = "- (none)"
+            parts.append(
+                f"## {entry.created_at.strftime('%Y-%m-%d %H:%M')} — {entry.query}\n\n"
+                f"- **ID:** {entry.id}\n"
+                f"- **Used ingest:** {entry.used_ingest}\n\n"
+                f"### Summary\n\n{entry.answer.summary}\n\n"
+                f"### Key Points\n\n{key_points}\n\n"
+                f"### Follow-ups\n\n{follow_ups}\n\n"
+                f"### Sources\n\n{sources}\n"
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
+        return destination
