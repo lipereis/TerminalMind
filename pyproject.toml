@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terminalmind"
+version = "0.1.0"
+description = "Personal Research Assistant CLI with structured OpenAI outputs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12",
+  "rich>=13",
+  "pydantic>=2",
+  "pydantic-settings>=2",
+  "openai>=1.40",
+  "loguru>=0.7",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[project.scripts]
+terminalmind = "terminalmind.main:app"
+
+[tool.setuptools.packages.find]
+include = ["terminalmind*"]
+
+[tool.pytest.ini_options]
+testpaths = ["terminalmind/tests"]
+pythonpath = ["."]
